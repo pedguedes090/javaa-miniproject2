@@ -5,6 +5,7 @@ import enums.VehicleType;
 
 import java.util.Queue;
 import java.util.LinkedList;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 
 public class Intersection {
@@ -57,6 +58,10 @@ public class Intersection {
      * Xe rời giao lộ
      */
     public void exit(Vehicle vehicle) {
+        if (vehicle == null) {
+            System.out.println("Error: Vehicle cannot be null");
+            return;
+        }
         synchronized (monitor) {
             if (currentVehicles == 0) {
                 return;
@@ -110,12 +115,16 @@ public class Intersection {
     }
 
     private void removeFromQueue(Vehicle vehicle) {
+    try {
         if (isPriority(vehicle)) {
             priorityQueue.remove(vehicle);
             return;
         }
-
         waitingQueue.remove(vehicle);
+    } catch (NoSuchElementException e) {
+        System.out.println("Warning: " + vehicle.getId() + " not found in queue");
+        // Hoặc ghi log, hoặc continue mà không break
+        }
     }
 
     private boolean isQueued(Vehicle vehicle) {
