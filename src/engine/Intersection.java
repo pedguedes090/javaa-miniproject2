@@ -2,20 +2,18 @@ package engine;
 
 import vehicle.Vehicle;
 import enums.VehicleType;
-
+import config.AppConstants;
 import java.util.Queue;
 import java.util.LinkedList;
+import java.util.NoSuchElementException;
 import java.util.Objects;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.ReentrantLock;
 
 public class Intersection {
 
-    private final ReentrantLock lock = new ReentrantLock(true); // fair lock
-    private final Condition condition = lock.newCondition();
+    private final Object monitor = new Object();
 
     private int currentVehicles = 0;
-    private static final int MAX_VEHICLES = 3;
+    private static final int MAX_VEHICLES = AppConstants.MAX_VEHICLE_QUEUE;
 
     // Queue ưu tiên
     private final Queue<Vehicle> waitingQueue = new LinkedList<>();
@@ -26,23 +24,22 @@ public class Intersection {
      */
     public void requestEntry(Vehicle vehicle) {
         Objects.requireNonNull(vehicle, "vehicle must not be null");
-        lock.lock();
-        try {
+        synchronized (monitor) {
             enqueue(vehicle);
 
             while (!canEnter(vehicle)) {
                 System.out.println(vehicle.getId() + " is waiting...");
-                condition.await();
+                try {
+                    monitor.wait();
+                } catch (InterruptedException e) {
+                    removeFromQueue(vehicle);
+                    monitor.notifyAll();
+                    Thread.currentThread().interrupt();
+                    return;
+                }
             }
 
             enter(vehicle);
-
-        } catch (InterruptedException e) {
-            removeFromQueue(vehicle);
-            condition.signalAll();
-            Thread.currentThread().interrupt();
-        } finally {
-            lock.unlock();
         }
     }
 
@@ -61,8 +58,11 @@ public class Intersection {
      * Xe rời giao lộ
      */
     public void exit(Vehicle vehicle) {
-        lock.lock();
-        try {
+        if (vehicle == null) {
+            System.out.println("Error: Vehicle cannot be null");
+            return;
+        }
+        synchronized (monitor) {
             if (currentVehicles == 0) {
                 return;
             }
@@ -71,10 +71,7 @@ public class Intersection {
             System.out.println(vehicle.getId() + " EXIT intersection");
 
             // đánh thức tất cả xe đang chờ
-            condition.signalAll();
-
-        } finally {
-            lock.unlock();
+            monitor.notifyAll();
         }
     }
 
@@ -118,12 +115,16 @@ public class Intersection {
     }
 
     private void removeFromQueue(Vehicle vehicle) {
+    try {
         if (isPriority(vehicle)) {
             priorityQueue.remove(vehicle);
             return;
         }
-
         waitingQueue.remove(vehicle);
+    } catch (NoSuchElementException e) {
+        System.out.println("Warning: " + vehicle.getId() + " not found in queue");
+        // Hoặc ghi log, hoặc continue mà không break
+        }
     }
 
     private boolean isQueued(Vehicle vehicle) {
