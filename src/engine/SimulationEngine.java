@@ -4,6 +4,8 @@ import config.AppConstants;
 import enums.Direction;
 import enums.LightColor;
 import factory.VehicleFactory;
+import monitor.TrafficMonitor;
+import queue.LaneQueue;
 import queue.VehicleQueueManager;
 import trafficlight.TrafficLight;
 import vehicle.Vehicle;
@@ -11,7 +13,6 @@ import vehicle.Vehicle;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -30,11 +31,13 @@ public class SimulationEngine {
     private final ScheduledExecutorService tickExecutor;
     private final AtomicBoolean isRunning;
 
-    private final EnumMap<Direction, ConcurrentLinkedQueue<Vehicle>> waitingQueueByDirection;
+    private final EnumMap<Direction, LaneQueue<Vehicle>> waitingQueueByDirection;
 
     private final AtomicLong tickCount;
     private final AtomicLong totalGenerated;
     private final AtomicLong totalPassed;
+
+    private final TrafficMonitor monitor;
 
     private volatile ScheduledFuture<?> tickTask;
 
@@ -50,12 +53,14 @@ public class SimulationEngine {
 
         this.waitingQueueByDirection = new EnumMap<>(Direction.class);
         for (Direction direction : Direction.values()) {
-            waitingQueueByDirection.put(direction, new ConcurrentLinkedQueue<>());
+            waitingQueueByDirection.put(direction, new LaneQueue<>());
         }
 
         this.tickCount = new AtomicLong(0);
         this.totalGenerated = new AtomicLong(0);
         this.totalPassed = new AtomicLong(0);
+
+        this.monitor = new TrafficMonitor(5); // jam threshold default
 
         // Giữ kết nối Observer để không phá flow module đã có.
         this.trafficLight.addObserver(new VehicleQueueManager());
@@ -66,8 +71,9 @@ public class SimulationEngine {
             return false;
         }
 
+        monitor.resetTimer();
         tickTask = tickExecutor.scheduleAtFixedRate(this::runOneTick, 0, AppConstants.SIMULATION_TICK, TimeUnit.SECONDS);
-        log("Simulation started");
+        log("Mo phong mo phong");
         return true;
     }
 
@@ -80,7 +86,8 @@ public class SimulationEngine {
             tickTask.cancel(false);
             tickTask = null;
         }
-        log("Simulation stopped");
+        log("Mo phong da dung");
+        monitor.printReport();
         return true;
     }
 
@@ -94,7 +101,7 @@ public class SimulationEngine {
         for (Vehicle vehicle : vehicles) {
             waitingQueueByDirection.get(vehicle.getDirection()).offer(vehicle);
             totalGenerated.incrementAndGet();
-            log("Spawn " + vehicle.getVehicleType() + " #" + vehicle.getId() + " at " + vehicle.getDirection());
+            log("Tao " + vehicle.getVehicleType() + " #" + vehicle.getId() + " o lan " + vehicle.getDirection());
         }
         return vehicles;
     }
@@ -125,11 +132,18 @@ public class SimulationEngine {
         trafficLight.tick();
 
         LightColor currentColor = trafficLight.getCurrentColor();
-        log("Traffic Light: " + currentColor + " (remain " + trafficLight.getRemainingTime() + "s)");
+        log("Trang thai den: " + currentColor + " (con lai " + trafficLight.getRemainingTime() + "s)");
+
+        // report queue sizes for jam detection
+        EnumMap<Direction, Integer> sizes = new EnumMap<>(Direction.class);
+        for (Direction d : Direction.values()) {
+            sizes.put(d, waitingQueueByDirection.get(d).size());
+        }
+        monitor.onQueueSizes(sizes);
 
         // Mỗi tick xử lý tối đa 1 xe mỗi hướng để flow dễ hiểu khi demo console.
         for (Direction direction : Direction.values()) {
-            ConcurrentLinkedQueue<Vehicle> laneQueue = waitingQueueByDirection.get(direction);
+            LaneQueue<Vehicle> laneQueue = waitingQueueByDirection.get(direction);
             Vehicle firstVehicle = laneQueue.peek();
             if (firstVehicle == null) {
                 continue;
@@ -140,10 +154,13 @@ public class SimulationEngine {
                 if (passedVehicle != null) {
                     passedVehicle.move();
                     totalPassed.incrementAndGet();
-                    log(passedVehicle.getVehicleType() + " #" + passedVehicle.getId() + " passed intersection");
+                    monitor.onVehiclePassed(passedVehicle);
+                    monitor.logPassed(passedVehicle);
+                    log(passedVehicle.getVehicleType() + " #" + passedVehicle.getId() + " da di qua giao lo");
                 }
             } else {
-                log(firstVehicle.getVehicleType() + " #" + firstVehicle.getId() + " waiting at " + direction);
+                monitor.logWaiting(firstVehicle, direction);
+                log(firstVehicle.getVehicleType() + " #" + firstVehicle.getId() + " dang doi o lan " + direction);
             }
         }
     }
