@@ -6,13 +6,10 @@ import enums.VehicleType;
 import java.util.Queue;
 import java.util.LinkedList;
 import java.util.Objects;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.ReentrantLock;
 
 public class Intersection {
 
-    private final ReentrantLock lock = new ReentrantLock(true); // fair lock
-    private final Condition condition = lock.newCondition();
+    private final Object monitor = new Object();
 
     private int currentVehicles = 0;
     private static final int MAX_VEHICLES = 3;
@@ -26,23 +23,22 @@ public class Intersection {
      */
     public void requestEntry(Vehicle vehicle) {
         Objects.requireNonNull(vehicle, "vehicle must not be null");
-        lock.lock();
-        try {
+        synchronized (monitor) {
             enqueue(vehicle);
 
             while (!canEnter(vehicle)) {
                 System.out.println(vehicle.getId() + " is waiting...");
-                condition.await();
+                try {
+                    monitor.wait();
+                } catch (InterruptedException e) {
+                    removeFromQueue(vehicle);
+                    monitor.notifyAll();
+                    Thread.currentThread().interrupt();
+                    return;
+                }
             }
 
             enter(vehicle);
-
-        } catch (InterruptedException e) {
-            removeFromQueue(vehicle);
-            condition.signalAll();
-            Thread.currentThread().interrupt();
-        } finally {
-            lock.unlock();
         }
     }
 
@@ -61,8 +57,7 @@ public class Intersection {
      * Xe rời giao lộ
      */
     public void exit(Vehicle vehicle) {
-        lock.lock();
-        try {
+        synchronized (monitor) {
             if (currentVehicles == 0) {
                 return;
             }
@@ -71,10 +66,7 @@ public class Intersection {
             System.out.println(vehicle.getId() + " EXIT intersection");
 
             // đánh thức tất cả xe đang chờ
-            condition.signalAll();
-
-        } finally {
-            lock.unlock();
+            monitor.notifyAll();
         }
     }
 
