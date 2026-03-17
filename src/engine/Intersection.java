@@ -2,7 +2,7 @@ package engine;
 
 import vehicle.Vehicle;
 import enums.VehicleType;
-
+import config.AppConstants;
 import java.util.Queue;
 import java.util.LinkedList;
 import java.util.NoSuchElementException;
@@ -13,7 +13,7 @@ public class Intersection {
     private final Object monitor = new Object();
 
     private int currentVehicles = 0;
-    private static final int MAX_VEHICLES = 3;
+    private static final int MAX_VEHICLES = AppConstants.MAX_VEHICLE_QUEUE;
 
     // Queue ưu tiên
     private final Queue<Vehicle> waitingQueue = new LinkedList<>();
